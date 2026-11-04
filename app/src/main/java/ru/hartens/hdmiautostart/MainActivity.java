@@ -11,133 +11,109 @@ import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
 public class MainActivity extends Activity {
-    private static final String HDMI_3_URI =
-        "content://android.media.tv/passthrough/com.mediatek.tvinput%2F.hdmi.HDMIInputService%2FHW6";
+    private static final String HDMI_3_URI = "content://android.media.tv/passthrough/com.mediatek.tvinput%2F.hdmi.HDMIInputService%2FHW6";
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private boolean wasStarted = false;
-    private TextView status;
     private Runnable pendingLaunch;
+    private TextView status;
+    private LinearLayout controls;
 
-    @Override
-    protected void onCreate(Bundle state) {
+    @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setGravity(Gravity.CENTER);
-        panel.setPadding(50, 30, 50, 30);
-        panel.setBackgroundColor(Color.rgb(22, 27, 37));
+        getWindow().getDecorView().setSystemUiVisibility(5894 | 1024 | 512);
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(Color.BLACK);
+        ImageView splash = new ImageView(this);
+        splash.setImageResource(R.drawable.splash);
+        splash.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        root.addView(splash, new FrameLayout.LayoutParams(-1, -1));
 
-        TextView heading = new TextView(this);
-        heading.setText("HDMI AutoStart · HDMI 3");
-        heading.setTextColor(Color.WHITE);
-        heading.setTextSize(28);
-        heading.setGravity(Gravity.CENTER);
-        panel.addView(heading);
-
+        controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.VERTICAL);
+        controls.setGravity(Gravity.CENTER);
+        controls.setPadding(20, 20, 20, 20);
+        controls.setBackgroundColor(0xE6000000);
+        FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
         status = new TextView(this);
-        status.setTextColor(Color.LTGRAY);
-        status.setTextSize(19);
+        status.setTextColor(Color.WHITE);
+        status.setTextSize(18);
         status.setGravity(Gravity.CENTER);
-        status.setPadding(10, 22, 10, 22);
-        panel.addView(status);
-
-        Button hdmiButton = makeButton("Открыть HDMI 3");
-        hdmiButton.setOnClickListener(v -> {
+        controls.addView(status);
+        Button hdmi = makeButton("Открыть HDMI 3");
+        hdmi.setOnClickListener(v -> { cancelPending(); openHdmi3(); });
+        controls.addView(hdmi);
+        Button salute = makeButton("Открыть Салют ТВ");
+        salute.setOnClickListener(v -> { cancelPending(); openSalute(); });
+        controls.addView(salute);
+        Button toggle = makeButton("Включить / выключить автопереход");
+        toggle.setOnClickListener(v -> {
+            boolean enabled = !isAutoEnabled();
+            getPreferences(MODE_PRIVATE).edit().putBoolean("auto_enabled", enabled).apply();
             cancelPending();
-            openHdmi3();
+            status.setText(enabled ? "Автопереход включён. Нажмите HOME для запуска." : "Автопереход отключён.");
         });
-        panel.addView(hdmiButton);
-
-        Button saluteButton = makeButton("Открыть Салют ТВ");
-        saluteButton.setOnClickListener(v -> {
-            cancelPending();
-            openSalute();
-        });
-        panel.addView(saluteButton);
-
-        Button settingButton = makeButton("Автопереход: переключить");
-        settingButton.setOnClickListener(v -> {
-            boolean next = !isAutoEnabled();
-            getPreferences(MODE_PRIVATE).edit().putBoolean("auto_enabled", next).apply();
-            cancelPending();
-            status.setText(next ? "Автопереход включён. Нажмите HDMI 3 или Home." : "Автопереход отключён. Включить можно этой кнопкой.");
-        });
-        panel.addView(settingButton);
-
-        setContentView(panel);
+        controls.addView(toggle);
+        root.addView(controls, cp);
+        setContentView(root);
     }
 
-    private Button makeButton(String caption) {
-        Button button = new Button(this);
-        button.setText(caption);
-        button.setTextSize(19);
-        button.setFocusable(true);
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(480, 78);
-        p.topMargin = 12;
-        button.setLayoutParams(p);
-        return button;
+    private Button makeButton(String title) {
+        Button b = new Button(this);
+        b.setText(title);
+        b.setFocusable(true);
+        controlsLayout(b);
+        return b;
     }
-
+    private void controlsLayout(Button b) {
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
+        p.topMargin = 4;
+        b.setLayoutParams(p);
+    }
     private boolean isAutoEnabled() {
         return getPreferences(MODE_PRIVATE).getBoolean("auto_enabled", true);
     }
-
-    @Override
-    protected void onResume() {
+    @Override protected void onResume() {
         super.onResume();
+        cancelPending();
         if (!isAutoEnabled()) {
-            status.setText("Автопереход выключен. Выберите действие пультом.");
+            controls.setVisibility(View.VISIBLE);
+            status.setText("Автопереход выключен. Выберите действие.");
             return;
         }
-        // HOME is launched in the foreground, avoiding Android 11 background-start restrictions.
-        // A short delay allows the MediaTek TV input services to initialise after power-on.
-        cancelPending();
-        status.setText("Переключение на HDMI 3 через 6 секунд...");
+        controls.setVisibility(View.GONE);
+        // 6 seconds on every HOME launch: give HDMI hardware time to initialise after power-on.
         pendingLaunch = this::openHdmi3;
-        handler.postDelayed(pendingLaunch, wasStarted ? 1500 : 6000);
-        wasStarted = true;
+        handler.postDelayed(pendingLaunch, 6000);
     }
-
     private void cancelPending() {
         if (pendingLaunch != null) {
             handler.removeCallbacks(pendingLaunch);
             pendingLaunch = null;
         }
     }
-
     private void openHdmi3() {
         pendingLaunch = null;
         try {
-            Intent intent = new Intent(Intent.ACTION_VIEW,
-                Uri.parse(HDMI_3_URI));
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(intent);
-            status.setText("Отправлена команда HDMI 3");
+            Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(HDMI_3_URI));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
         } catch (Exception e) {
-            status.setText("Не удалось открыть HDMI 3: " + e.getClass().getSimpleName()
-                + " · " + e.getMessage());
+            controls.setVisibility(View.VISIBLE);
+            status.setText("Ошибка HDMI 3: " + e.getMessage());
         }
     }
-
     private void openSalute() {
         try {
-            Intent intent = new Intent();
-            intent.setComponent(new ComponentName("ru.sberdevices.starlauncher",
-                "ru.sberdevices.starlauncher.ui.mainscreen.MainActivity"));
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(intent);
-        } catch (Exception e) {
-            status.setText("Не удалось открыть Салют ТВ: " + e.getMessage());
-        }
+            Intent i = new Intent();
+            i.setComponent(new ComponentName("ru.sberdevices.starlauncher", "ru.sberdevices.starlauncher.ui.mainscreen.MainActivity"));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+        } catch (Exception e) { status.setText("Ошибка Салют ТВ: " + e.getMessage()); }
     }
-
-    @Override
-    protected void onPause() {
-        cancelPending();
-        super.onPause();
-    }
+    @Override protected void onPause() { cancelPending(); super.onPause(); }
 }
